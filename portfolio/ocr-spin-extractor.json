@@ -1,0 +1,14 @@
+{
+  "section": "python",
+  "category": "desktop",
+  "n": 7,
+  "title": "OCR Spin Extractor",
+  "desc": "Extracts spin session and exercise performance data from workout screenshots using an OCR pipeline, exported to CSV.",
+  "code": "https://github.com/Naadir-Dev-Portfolio/OCR-Spin-Extractor/blob/main/main.py",
+  "details": "https://github.com/Naadir-Dev-Portfolio/OCR-Spin-Extractor/blob/main/README.md",
+  "tags": [
+    "python",
+    "ocr",
+    "automation"
+  ]
+}
