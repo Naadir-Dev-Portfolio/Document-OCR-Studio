@@ -1,0 +1,20 @@
+{
+  "section": "python",
+  "category": "desktop",
+  "n": 3,
+  "title": "Document OCR Studio",
+  "img": "document-ocr-studio.png",
+  "imgFeatured": "document-ocr-studio-featured.png",
+  "imgs": [
+    "document-ocr-studio.png",
+    "document-ocr-studio-full.png"
+  ],
+  "desc": "Local deterministic OCR desktop app for scanning document images into editable text, structured sections and CSV-ready grids.",
+  "code": "https://github.com/Naadir-Dev-Portfolio/Document-OCR-Studio/blob/main/main.py",
+  "details": "https://github.com/Naadir-Dev-Portfolio/Document-OCR-Studio/blob/main/README.md",
+  "tags": [
+    "python",
+    "ocr",
+    "desktop"
+  ]
+}
