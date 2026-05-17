@@ -34,10 +34,30 @@ Install the Python dependencies:
 python -m pip install -r requirements.txt
 ```
 
-Install Tesseract OCR and make sure `tesseract.exe` is available on `PATH`. If it is installed somewhere custom, set:
+Install the native Tesseract OCR engine:
 
 ```powershell
-$env:TESSERACT_CMD="C:\Program Files\Tesseract-OCR\tesseract.exe"
+winget install --id UB-Mannheim.TesseractOCR -e
+```
+
+Close and reopen PowerShell, then verify Windows can find it:
+
+```powershell
+where.exe tesseract
+tesseract --version
+```
+
+If `where.exe tesseract` does not print a path, set a permanent fallback:
+
+```powershell
+$tesseractPath = "C:\Program Files\Tesseract-OCR\tesseract.exe"
+[Environment]::SetEnvironmentVariable("TESSERACT_CMD", $tesseractPath, "User")
+
+$tesseractDir = Split-Path $tesseractPath
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($userPath -notlike "*$tesseractDir*") {
+    [Environment]::SetEnvironmentVariable("Path", "$userPath;$tesseractDir", "User")
+}
 ```
 
 Run the app:
@@ -56,5 +76,6 @@ python main.py
 ## Notes
 
 - The OCR path is local and deterministic: OpenCV image preparation plus Tesseract recognition.
+- The `Setup` tab shows copyable Windows commands if Tesseract or Python OCR dependencies are missing.
 - `tkinterdnd2` enables drag-and-drop. If it is missing, the app still works through `Open Image`.
 - Exported CSV files are intentionally ignored by git so test exports do not pollute the repo.

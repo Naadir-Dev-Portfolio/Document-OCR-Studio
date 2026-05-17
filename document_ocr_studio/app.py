@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -45,6 +44,34 @@ COLORS = {
 }
 
 
+PYTHON_SETUP_COMMANDS = """python -m pip install -r requirements.txt"""
+
+TESSERACT_INSTALL_COMMANDS = """winget install --id UB-Mannheim.TesseractOCR -e
+where.exe tesseract
+tesseract --version"""
+
+TESSERACT_PATH_COMMANDS = """$tesseractPath = "C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+[Environment]::SetEnvironmentVariable("TESSERACT_CMD", $tesseractPath, "User")
+
+$tesseractDir = Split-Path $tesseractPath
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($userPath -notlike "*$tesseractDir*") {
+    [Environment]::SetEnvironmentVariable("Path", "$userPath;$tesseractDir", "User")
+}
+
+where.exe tesseract
+tesseract --version"""
+
+FULL_SETUP_COMMANDS = f"""# 1. Install Python packages
+{PYTHON_SETUP_COMMANDS}
+
+# 2. Install the Windows Tesseract OCR engine
+{TESSERACT_INSTALL_COMMANDS}
+
+# 3. If Windows still cannot find tesseract, run this and restart the app
+{TESSERACT_PATH_COMMANDS}"""
+
+
 class DocumentOCRStudio:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -65,6 +92,7 @@ class DocumentOCRStudio:
             value="Tesseract OCR" if DND_AVAILABLE else "Tesseract OCR | drop support optional"
         )
         self.active_editor: tk.Entry | None = None
+        self.setup_text: tk.Text | None = None
 
         self._configure_style()
         self._build_layout()
@@ -295,7 +323,9 @@ class DocumentOCRStudio:
         sections_y.grid(row=0, column=1, sticky="ns")
         self.notebook.add(sections_frame, text="Sections")
 
+        self._build_setup_tab()
         self._set_grid([])
+        self._show_setup_help("Tesseract has not been checked yet. If Scan fails, use these setup commands.")
 
     def _build_status_bar(self, parent: ttk.Frame) -> None:
         bar = ttk.Frame(parent, style="App.TFrame")
@@ -390,7 +420,7 @@ class DocumentOCRStudio:
     def _scan_failed(self, message: str) -> None:
         self.scan_button.configure(state="normal")
         self.status_text.set(message)
-        messagebox.showerror("Scan failed", message)
+        self._show_setup_help(message)
 
     def _scan_complete(self, result: OCRResult) -> None:
         self.scan_button.configure(state="normal")
@@ -448,6 +478,88 @@ class DocumentOCRStudio:
             return
         write_rows_to_csv(target, rows)
         self.status_text.set(f"Exported {len(rows)} rows to {Path(target).name}")
+
+    def _build_setup_tab(self) -> None:
+        setup_frame = ttk.Frame(self.notebook, style="Soft.TFrame")
+        setup_frame.rowconfigure(1, weight=1)
+        setup_frame.columnconfigure(0, weight=1)
+
+        top = tk.Frame(setup_frame, bg=COLORS["panel_alt"])
+        top.grid(row=0, column=0, sticky="ew", padx=14, pady=(14, 8))
+        tk.Label(
+            top,
+            text="Setup and Diagnostics",
+            bg=COLORS["panel_alt"],
+            fg=COLORS["text"],
+            font=("Segoe UI", 13, "bold"),
+        ).pack(side="left")
+
+        actions = tk.Frame(top, bg=COLORS["panel_alt"])
+        actions.pack(side="right")
+        ttk.Button(
+            actions,
+            text="Copy Full Setup",
+            command=lambda: self._copy_text(FULL_SETUP_COMMANDS, "Copied full setup commands"),
+        ).pack(side="left", padx=(0, 8))
+        ttk.Button(
+            actions,
+            text="Copy PATH Fix",
+            command=lambda: self._copy_text(TESSERACT_PATH_COMMANDS, "Copied PATH fix commands"),
+        ).pack(side="left")
+
+        self.setup_text = tk.Text(
+            setup_frame,
+            bg=COLORS["panel_alt"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["accent"],
+            relief="flat",
+            wrap="word",
+            padx=14,
+            pady=12,
+            font=("Cascadia Mono", 10),
+            height=20,
+        )
+        self.setup_text.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 14))
+        self.notebook.add(setup_frame, text="Setup")
+
+    def _show_setup_help(self, message: str) -> None:
+        if self.setup_text is None:
+            return
+        help_text = f"""Current issue
+-------------
+{message}
+
+What this means
+---------------
+Document OCR Studio uses the Python package `pytesseract`, but that package is only a bridge.
+Windows also needs the native `tesseract.exe` OCR engine installed and discoverable on PATH.
+
+Recommended Windows setup
+-------------------------
+Open PowerShell in the repo folder and run:
+
+{FULL_SETUP_COMMANDS}
+
+After installing or changing PATH
+---------------------------------
+1. Close and reopen PowerShell.
+2. Restart Document OCR Studio.
+3. Check that this command prints a path:
+
+where.exe tesseract
+
+If it still fails, set TESSERACT_CMD permanently with the PATH fix above.
+"""
+        self.setup_text.configure(state="normal")
+        self.setup_text.delete("1.0", "end")
+        self.setup_text.insert("1.0", help_text)
+        self.setup_text.configure(state="disabled")
+        self.notebook.select(self.notebook.tabs()[-1])
+
+    def _copy_text(self, text: str, status: str) -> None:
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        self.status_text.set(status)
 
     def _draw_empty_preview(self) -> None:
         self.preview_canvas.delete("all")
