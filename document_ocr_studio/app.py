@@ -17,6 +17,9 @@ from .ocr_engine import (
     write_rows_to_csv,
 )
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+LOGO_PATH = ROOT_DIR / "images" / "logo.png"
+
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
 
@@ -79,10 +82,13 @@ class DocumentOCRStudio:
         self.root.geometry("1320x820")
         self.root.minsize(1080, 680)
         self.root.configure(bg=COLORS["bg"])
+        self._apply_dark_title_bar()
 
         self.image_path: Path | None = None
         self.preview_image: Image.Image | None = None
         self.preview_photo: ImageTk.PhotoImage | None = None
+        self.logo_photo: ImageTk.PhotoImage | None = None
+        self.window_icon: ImageTk.PhotoImage | None = None
         self.last_result: OCRResult | None = None
         self.grid_rows: list[list[str]] = []
         self.edit_mode = tk.BooleanVar(value=True)
@@ -95,9 +101,42 @@ class DocumentOCRStudio:
         self.setup_text: tk.Text | None = None
 
         self._configure_style()
+        self._load_brand_assets()
         self._build_layout()
+        self.root.after(50, self._apply_dark_title_bar)
         self._bind_shortcuts()
         self._enable_drop_target()
+
+    def _apply_dark_title_bar(self) -> None:
+        if self.root.tk.call("tk", "windowingsystem") != "win32":
+            return
+        try:
+            import ctypes
+
+            self.root.update_idletasks()
+            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
+            enabled = ctypes.c_int(1)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(enabled), ctypes.sizeof(enabled))
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(enabled), ctypes.sizeof(enabled))
+        except Exception:
+            return
+
+    def _load_brand_assets(self) -> None:
+        if not LOGO_PATH.exists():
+            return
+        try:
+            logo = Image.open(LOGO_PATH).convert("RGBA")
+            header_logo = logo.copy()
+            header_logo.thumbnail((48, 48), Image.Resampling.LANCZOS)
+            self.logo_photo = ImageTk.PhotoImage(header_logo)
+
+            icon_logo = logo.copy()
+            icon_logo.thumbnail((64, 64), Image.Resampling.LANCZOS)
+            self.window_icon = ImageTk.PhotoImage(icon_logo)
+            self.root.iconphoto(True, self.window_icon)
+        except Exception:
+            self.logo_photo = None
+            self.window_icon = None
 
     def _configure_style(self) -> None:
         style = ttk.Style(self.root)
@@ -214,9 +253,13 @@ class DocumentOCRStudio:
 
         title_block = ttk.Frame(header, style="App.TFrame")
         title_block.grid(row=0, column=0, sticky="w")
-        ttk.Label(title_block, text="Document OCR Studio", style="Hero.TLabel").pack(anchor="w")
+        if self.logo_photo:
+            tk.Label(title_block, image=self.logo_photo, bg=COLORS["bg"], bd=0).pack(side="left", padx=(0, 12))
+        title_text = ttk.Frame(title_block, style="App.TFrame")
+        title_text.pack(side="left", anchor="w")
+        ttk.Label(title_text, text="Document OCR Studio", style="Hero.TLabel").pack(anchor="w")
         ttk.Label(
-            title_block,
+            title_text,
             text="Local deterministic OCR with editable data grids and CSV export",
             style="Sub.TLabel",
         ).pack(anchor="w", pady=(2, 0))
@@ -563,9 +606,16 @@ If it still fails, set TESSERACT_CMD permanently with the PATH fix above.
 
     def _draw_empty_preview(self) -> None:
         self.preview_canvas.delete("all")
-        width = max(self.preview_canvas.winfo_width(), 520)
-        height = max(self.preview_canvas.winfo_height(), 520)
-        self.preview_canvas.create_rectangle(28, 28, width - 28, height - 28, outline=COLORS["border"], dash=(4, 4))
+        width = self.preview_canvas.winfo_width()
+        height = self.preview_canvas.winfo_height()
+        if width <= 2 or height <= 2:
+            width, height = 520, 520
+        inset = max(18, min(34, int(min(width, height) * 0.08)))
+        left = inset
+        top = inset
+        right = max(left + 2, width - inset - 2)
+        bottom = max(top + 2, height - inset - 2)
+        self.preview_canvas.create_rectangle(left, top, right, bottom, outline=COLORS["border"], dash=(4, 4))
         self.preview_canvas.create_text(
             width / 2,
             height / 2 - 12,
