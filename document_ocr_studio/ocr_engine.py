@@ -76,30 +76,44 @@ def validate_image_path(path: str | Path) -> Path:
 def scan_image(path: str | Path, language: str = "eng") -> OCRResult:
     image_path = validate_image_path(path)
     pytesseract = _load_tesseract()
-    processed, image_size = _preprocess_image(image_path)
-
+    candidates, image_size = _preprocess_candidates(image_path)
     config = "--oem 3 --psm 6 -c preserve_interword_spaces=1"
-    try:
-        raw_data = pytesseract.image_to_data(
-            processed,
-            lang=language,
-            config=config,
-            output_type=pytesseract.Output.DICT,
-        )
-        raw_text = pytesseract.image_to_string(
-            processed,
-            lang=language,
-            config=config,
-        ).strip()
-    except Exception as exc:
-        raise OCREngineError(f"Tesseract OCR failed: {exc}") from exc
 
-    words = _parse_words(raw_data)
-    lines = _build_lines(words)
-    table_rows = _extract_table_rows(lines)
-    key_values = _extract_key_values(lines)
-    confidence = _average_confidence(words)
-    text = raw_text or "\n".join(line.text for line in lines)
+    best_result = None
+    last_error: Exception | None = None
+    for _name, processed in candidates:
+        try:
+            raw_data = pytesseract.image_to_data(
+                processed,
+                lang=language,
+                config=config,
+                output_type=pytesseract.Output.DICT,
+            )
+            raw_text = pytesseract.image_to_string(
+                processed,
+                lang=language,
+                config=config,
+            ).strip()
+        except Exception as exc:
+            last_error = exc
+            continue
+
+        words = _parse_words(raw_data)
+        lines = _build_lines(words)
+        table_rows = _extract_table_rows(lines)
+        key_values = _extract_key_values(lines)
+        confidence = _average_confidence(words)
+        text = raw_text or "\n".join(line.text for line in lines)
+        score = _score_ocr_candidate(text, words, lines, table_rows)
+
+        candidate = (score, text, confidence, words, lines, table_rows, key_values)
+        if best_result is None or candidate[0] > best_result[0]:
+            best_result = candidate
+
+    if best_result is None:
+        raise OCREngineError(f"Tesseract OCR failed: {last_error}") from last_error
+
+    _, text, confidence, words, lines, table_rows, key_values = best_result
 
     if not text and not words:
         raise OCREngineError("No text was detected in the image.")
@@ -189,7 +203,7 @@ def _load_tesseract():
     return pytesseract
 
 
-def _preprocess_image(image_path: Path):
+def _preprocess_candidates(image_path: Path):
     try:
         import cv2
     except ImportError as exc:
@@ -205,13 +219,15 @@ def _preprocess_image(image_path: Path):
     height, width = image.shape[:2]
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
+    candidates = [("gray", gray)]
+
     longest_edge = max(width, height)
-    if longest_edge < 1800:
+    if longest_edge < 1400:
         scale = min(2.4, 1800 / max(1, longest_edge))
-        gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
-    elif longest_edge > 3600:
-        scale = 3600 / longest_edge
-        gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        candidates.append(("scaled-gray", cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)))
+
+    _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    candidates.append(("otsu", otsu))
 
     denoised = cv2.fastNlMeansDenoising(gray, h=8)
     clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
@@ -224,7 +240,30 @@ def _preprocess_image(image_path: Path):
         31,
         12,
     )
-    return binary, (width, height)
+    candidates.append(("adaptive", binary))
+    return candidates, (width, height)
+
+
+def _score_ocr_candidate(
+    text: str,
+    words: Iterable[OCRWord],
+    lines: Iterable[OCRLine],
+    table_rows: Iterable[Iterable[str]],
+) -> float:
+    line_list = list(lines)
+    word_list = list(words)
+    table_list = [list(row) for row in table_rows]
+    date_lines = sum(1 for line in line_list if _line_starts_with_date(line))
+    money_words = sum(1 for word in word_list if _looks_like_money(word.text))
+    header_bonus = 0
+    text_lower = text.lower()
+    for keyword in ("date", "description", "withdraw", "deposit", "balance"):
+        if keyword in text_lower:
+            header_bonus += 8
+    table_bonus = len(table_list) * 6
+    width_bonus = max((len(row) for row in table_list), default=0) * 4
+    junk_penalty = len(re.findall(r"[_\[\]{}|]{2,}", text)) * 2
+    return _average_confidence(word_list) + date_lines * 10 + money_words * 1.5 + header_bonus + table_bonus + width_bonus - junk_penalty
 
 
 def _parse_words(raw_data: dict) -> list[OCRWord]:
@@ -306,6 +345,10 @@ def _extract_key_values(lines: Iterable[OCRLine]) -> list[tuple[str, str]]:
 
 
 def _extract_table_rows(lines: Iterable[OCRLine]) -> list[list[str]]:
+    financial_rows = _extract_financial_statement_rows(lines)
+    if financial_rows:
+        return financial_rows
+
     segmented_rows = []
     for line in lines:
         segments = _split_line_into_cells(line.words)
@@ -335,6 +378,197 @@ def _extract_table_rows(lines: Iterable[OCRLine]) -> list[list[str]]:
     rows = _normalize_rows(rows)
     useful_rows = [row for row in rows if sum(bool(cell.strip()) for cell in row) >= 2]
     return useful_rows if len(useful_rows) >= 2 else []
+
+
+def _extract_financial_statement_rows(lines: Iterable[OCRLine]) -> list[list[str]]:
+    line_list = list(lines)
+    dated_lines = [line for line in line_list if _line_starts_with_date(line)]
+    if len(dated_lines) < 3:
+        return []
+
+    numeric_columns = _financial_numeric_columns(dated_lines)
+    if len(numeric_columns) < 2:
+        return []
+
+    labels = _financial_column_labels(numeric_columns)
+    headers = ["Date", "Description", "Ref.", "Withdrawals", "Deposits", "Balance"]
+    rows = [headers]
+
+    for line in dated_lines:
+        row = _financial_row_from_line(line, numeric_columns, labels)
+        if row:
+            rows.append(row)
+
+    for line in line_list:
+        if "total" not in line.text.lower():
+            continue
+        row = _financial_total_row_from_line(line, numeric_columns, labels)
+        if row:
+            rows.append(row)
+
+    return rows if len(rows) > 2 else []
+
+
+def _financial_numeric_columns(lines: list[OCRLine]) -> list[float]:
+    description_start = _median_description_start(lines)
+    right_edge = max((word.right for line in lines for word in line.words), default=0)
+    min_numeric_x = description_start + max(160, (right_edge - description_start) * 0.36)
+    positions = []
+    for line in lines:
+        for word in line.words:
+            if word.center_x < min_numeric_x:
+                continue
+            if _looks_like_money(word.text) or _looks_like_ref(word.text):
+                positions.append(int(word.center_x))
+    return [float(pos) for pos in _cluster_positions(sorted(positions))]
+
+
+def _financial_column_labels(columns: list[float]) -> dict[int, str]:
+    if len(columns) >= 4:
+        selected = columns[-4:]
+        return {
+            columns.index(selected[0]): "Ref.",
+            columns.index(selected[1]): "Withdrawals",
+            columns.index(selected[2]): "Deposits",
+            columns.index(selected[3]): "Balance",
+        }
+    if len(columns) == 3:
+        return {0: "Withdrawals", 1: "Deposits", 2: "Balance"}
+    return {len(columns) - 2: "Deposits", len(columns) - 1: "Balance"}
+
+
+def _financial_row_from_line(
+    line: OCRLine,
+    columns: list[float],
+    labels: dict[int, str],
+) -> list[str] | None:
+    words = sorted(line.words, key=lambda word: word.left)
+    if not words:
+        return None
+
+    date = _extract_date(words[0].text)
+    if not date:
+        return None
+
+    cells = {"Date": date, "Description": "", "Ref.": "", "Withdrawals": "", "Deposits": "", "Balance": ""}
+    description_words: list[str] = []
+    for word in words[1:]:
+        column_index = _nearest_financial_column(word, columns)
+        label = labels.get(column_index) if column_index is not None else None
+        if label and (_looks_like_money(word.text) or _looks_like_ref(word.text)):
+            cells[label] = _join_cell(cells[label], _clean_financial_value(word.text, label))
+        else:
+            description_words.append(word.text)
+
+    cells["Description"] = _clean_description(" ".join(description_words))
+    if not cells["Description"] and not any(cells[key] for key in ("Ref.", "Withdrawals", "Deposits", "Balance")):
+        return None
+    return [cells["Date"], cells["Description"], cells["Ref."], cells["Withdrawals"], cells["Deposits"], cells["Balance"]]
+
+
+def _financial_total_row_from_line(
+    line: OCRLine,
+    columns: list[float],
+    labels: dict[int, str],
+) -> list[str] | None:
+    cells = {"Date": "", "Description": "", "Ref.": "", "Withdrawals": "", "Deposits": "", "Balance": ""}
+    description_words: list[str] = []
+    for word in sorted(line.words, key=lambda item: item.left):
+        column_index = _nearest_financial_column(word, columns)
+        label = labels.get(column_index) if column_index is not None else None
+        if label and _looks_like_money(word.text):
+            cells[label] = _join_cell(cells[label], _clean_financial_value(word.text, label))
+        elif not _looks_like_money(word.text):
+            description_words.append(word.text)
+    cells["Description"] = _clean_description(" ".join(description_words)) or "Totals"
+    return [cells["Date"], cells["Description"], cells["Ref."], cells["Withdrawals"], cells["Deposits"], cells["Balance"]]
+
+
+def _line_starts_with_date(line: OCRLine) -> bool:
+    if not line.words:
+        return False
+    return bool(_extract_date(line.words[0].text))
+
+
+def _extract_date(value: str) -> str:
+    match = re.search(r"\d{4}[-/]\d{2}[-/]\d{2}", value)
+    return match.group(0).replace("/", "-") if match else ""
+
+
+def _median_description_start(lines: list[OCRLine]) -> float:
+    starts = []
+    for line in lines:
+        words = sorted(line.words, key=lambda word: word.left)
+        if len(words) >= 2:
+            starts.append(words[1].left)
+    return float(median(starts)) if starts else 0.0
+
+
+def _nearest_financial_column(word: OCRWord, columns: list[float]) -> int | None:
+    if not columns:
+        return None
+    distances = [abs(word.center_x - column) for column in columns]
+    nearest_index = min(range(len(columns)), key=lambda index: distances[index])
+    gaps = [b - a for a, b in zip(columns, columns[1:]) if b - a > 0]
+    tolerance = max(56.0, (median(gaps) * 0.42) if gaps else 64.0)
+    return nearest_index if distances[nearest_index] <= tolerance else None
+
+
+def _looks_like_ref(value: str) -> bool:
+    cleaned = re.sub(r"\D", "", value)
+    return bool(re.fullmatch(r"\d{3,6}", cleaned))
+
+
+def _looks_like_money(value: str) -> bool:
+    text = _normalize_ocr_number_text(value)
+    return bool(re.search(r"\d+[,.]\d{2}", text))
+
+
+def _clean_financial_value(value: str, label: str) -> str:
+    if label == "Ref.":
+        return re.sub(r"\D", "", value)
+
+    text = _normalize_ocr_number_text(value)
+    negative = text.startswith("-") or text.startswith("~") or text.startswith("−")
+    text = text.lstrip("-~−")
+    text = re.sub(r"[^0-9,.\s]", "", text).strip()
+    text = re.sub(r"\s+", "", text)
+
+    if "," in text and "." not in text:
+        head, tail = text.rsplit(",", 1)
+        if len(tail) == 2:
+            text = f"{head}.{tail}"
+    if text.count(".") > 1:
+        first, *rest = text.split(".")
+        text = first + "." + "".join(rest)
+
+    if negative:
+        text = f"-{text}"
+    return text
+
+
+def _normalize_ocr_number_text(value: str) -> str:
+    return (
+        value.strip()
+        .replace("§", "5")
+        .replace("з", "5")
+        .replace("З", "5")
+        .replace("−", "-")
+        .replace("—", "-")
+        .replace("_", "")
+        .replace("[", "")
+        .replace("]", "")
+        .replace("|", "")
+    )
+
+
+def _clean_description(value: str) -> str:
+    text = value.replace("_", " ").replace("|", " ").replace("[", " ").replace("]", " ")
+    text = text.replace("—", "-").replace("–", "-")
+    text = re.sub(r"^[=\-.\s]+", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    text = text.replace("** Totals ***", "*** Totals ***")
+    return text
 
 
 def _split_line_into_cells(words: tuple[OCRWord, ...]) -> list[dict]:
