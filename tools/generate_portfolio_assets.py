@@ -11,17 +11,17 @@ CARD = ROOT / "repo-card.png"
 
 
 COLORS = {
-    "bg": "#111417",
-    "panel": "#181d21",
-    "panel_alt": "#20262b",
-    "panel_soft": "#252c31",
-    "border": "#354047",
-    "accent": "#2bb3a3",
-    "accent_2": "#d39d35",
+    "bg": "#070909",
+    "panel": "#0d1113",
+    "panel_alt": "#111518",
+    "panel_soft": "#182024",
+    "border": "#232b2f",
+    "accent": "#1fa99a",
+    "accent_2": "#b8842a",
     "text": "#eef4f2",
-    "muted": "#a8b4b0",
-    "muted_2": "#788781",
-    "canvas": "#0d1012",
+    "muted": "#94a19d",
+    "muted_2": "#65716d",
+    "canvas": "#050708",
 }
 
 
@@ -105,8 +105,8 @@ def draw_grid(draw, box):
         y = table_y + 42 + r * 42
         x = table_x
         for cell, width in zip(row, widths):
-            fill = "#1d2428" if r % 2 else "#20282d"
-            draw.rectangle((x, y, x + width, y + 42), fill=fill, outline="#303b42")
+            fill = "#0f1517" if r % 2 else "#11181b"
+            draw.rectangle((x, y, x + width, y + 42), fill=fill, outline="#252f33")
             draw.text((x + 10, y + 12), cell, fill=COLORS["text"], font=font(13))
             x += width
     draw.text((x1 + 18, y2 - 48), "Double-click cells to edit. Export edited rows to CSV.", fill=COLORS["muted"], font=font(15))
@@ -142,19 +142,19 @@ def build_screenshot(size=(1440, 900)) -> Image.Image:
 
 
 def build_repo_card(source: Image.Image) -> Image.Image:
-    card = Image.new("RGB", (1240, 560), "#0d1117")
+    card = Image.new("RGB", (1240, 560), "#050708")
     draw = ImageDraw.Draw(card)
-    rounded(draw, (28, 28, 1212, 532), 22, "#141a1f", "#354047", 2)
+    rounded(draw, (28, 28, 1212, 532), 22, "#0a0d0f", "#232b2f", 2)
     crop = source.resize((610, 382), Image.Resampling.LANCZOS)
-    rounded(draw, (586, 82, 1168, 468), 16, "#20262b", "#354047", 2)
+    rounded(draw, (586, 82, 1168, 468), 16, "#111518", "#232b2f", 2)
     card.paste(crop.crop((0, 0, 582, 386)), (586, 82))
-    draw.rectangle((586, 82, 1168, 468), outline="#354047", width=2)
+    draw.rectangle((586, 82, 1168, 468), outline="#232b2f", width=2)
     draw.text((78, 86), "Document OCR Studio", fill=COLORS["text"], font=font(48, True))
     draw.text((82, 166), "Local deterministic OCR for images,", fill=COLORS["muted"], font=font(24))
     draw.text((82, 200), "editable grids and CSV exports.", fill=COLORS["muted"], font=font(24))
     for i, tag in enumerate(["PYTHON", "OCR", "DESKTOP"]):
         x = 82 + i * 142
-        rounded(draw, (x, 294, x + 118, 336), 8, "#20262b", "#354047", 1)
+        rounded(draw, (x, 294, x + 118, 336), 8, "#111518", "#232b2f", 1)
         draw.text((x + 18, 305), tag, fill=COLORS["accent"], font=font(15, True))
     draw.text((82, 426), "Open image -> Scan -> Edit -> Export CSV", fill=COLORS["text"], font=font(22, True))
     return card

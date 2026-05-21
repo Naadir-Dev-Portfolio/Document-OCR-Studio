@@ -31,19 +31,19 @@ except ImportError:
 
 
 COLORS = {
-    "bg": "#111417",
-    "panel": "#181d21",
-    "panel_alt": "#20262b",
-    "panel_soft": "#252c31",
-    "border": "#354047",
-    "accent": "#2bb3a3",
-    "accent_2": "#d39d35",
+    "bg": "#070909",
+    "panel": "#0d1113",
+    "panel_alt": "#111518",
+    "panel_soft": "#182024",
+    "border": "#232b2f",
+    "accent": "#1fa99a",
+    "accent_2": "#b8842a",
     "text": "#eef4f2",
-    "muted": "#a8b4b0",
-    "muted_2": "#788781",
-    "danger": "#ef6b63",
-    "ok": "#76c893",
-    "canvas": "#0d1012",
+    "muted": "#94a19d",
+    "muted_2": "#65716d",
+    "danger": "#e05f57",
+    "ok": "#6fc38d",
+    "canvas": "#050708",
 }
 
 
@@ -181,7 +181,7 @@ class DocumentOCRStudio:
             font=("Segoe UI", 10, "bold"),
             padding=(18, 9),
         )
-        style.map("Accent.TButton", background=[("active", "#38caba")])
+        style.map("Accent.TButton", background=[("active", "#2bbdac")])
         style.configure(
             "Ghost.TButton",
             background=COLORS["panel"],
@@ -222,7 +222,7 @@ class DocumentOCRStudio:
             relief="flat",
             font=("Segoe UI", 9, "bold"),
         )
-        style.map("Treeview", background=[("selected", "#224d49")], foreground=[("selected", COLORS["text"])])
+        style.map("Treeview", background=[("selected", "#173d38")], foreground=[("selected", COLORS["text"])])
         style.configure(
             "TCheckbutton",
             background=COLORS["panel"],
@@ -768,10 +768,10 @@ If it still fails, set TESSERACT_CMD permanently with the PATH fix above.
         self._cancel_cell_edit()
         editor = tk.Entry(
             self.table_tree,
-            bg="#f5fbf9",
-            fg="#111417",
+            bg=COLORS["panel_alt"],
+            fg=COLORS["text"],
             relief="flat",
-            insertbackground="#111417",
+            insertbackground=COLORS["accent"],
             font=("Segoe UI", 10),
         )
         editor.insert(0, current)
